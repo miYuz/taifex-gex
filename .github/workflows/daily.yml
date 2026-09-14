@@ -1,0 +1,87 @@
+name: Daily update
+
+# GitHub 的 cron 是 UTC,台北 = UTC+8。
+#
+# 為什麼要排三個時段,而不是只排 15:20:GitHub 的排程是 best-effort,尖峰時會延遲
+# 甚至整個丟掉(taifex-vix 專案實測過,同款問題)。對策:錯開到冷門分鐘,並排三個
+# 時段當備援。這個 workflow 是冪等的(資料沒變就不 commit),多跑幾次沒有副作用。
+#
+# 排在 taifex-vix 自己的 15:15 之後(15:20 起跳),讓期交所選擇權原始行情有多一點
+# 緩衝時間穩定下來,雖然我們自己也會等結算價(--wait 45)。
+on:
+  schedule:
+    - cron: "22 7 * * 1-5"    # 台北 15:22 — 主要時段
+    - cron: "27 9 * * 1-5"    # 台北 17:27 — 備援
+    - cron: "47 13 * * 1-5"   # 台北 21:47 — 最後一道
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      # taifex_gex 依賴 taifex_vix 做到期日解析/選擇權行情抓取/TWSE 現貨快取,
+      # 兩個是姊妹專案,這裡直接簽出對方的原始碼加進 PYTHONPATH,不用重複維護一份。
+      - uses: actions/checkout@v4
+        with:
+          repository: miYuz/taifex-vix
+          path: taifex-vix-src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 更新資料並重建儀表板
+        env:
+          PYTHONPATH: ${{ github.workspace }}/taifex-vix-src
+          # 選擇權/TAIEX 快取放 runner 的暫存區(每次都是空的,用完即丟)
+          TAIFEX_VIX_DATA: ${{ runner.temp }}/taifex_vix_cache
+          TAIFEX_GEX_DATA: ${{ runner.temp }}/taifex_gex_cache
+          # 主輸出直接寫進版控目錄
+          TAIFEX_GEX_OUT: ${{ github.workspace }}/data
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m taifex_gex.cli daily --wait 45
+          python -m taifex_gex.build_dashboard docs/index.html
+
+      - name: 有變動才 commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data docs
+          # 只看 data/ 決定要不要 commit。docs/ 內含建置時間戳,每次都會不一樣,
+          # 拿它判斷的話三個排程時段就會各推一次同樣的資料。
+          if git diff --cached --quiet -- data; then
+            echo "資料沒有變動(可能是非交易日,或結算價還沒出),不產生 commit"
+            git reset -q
+            exit 0
+          fi
+          LAST=$(python -c "import pandas as pd; d=pd.read_csv('data/gex_txo_daily.csv'); print(d.trade_date.max())")
+          git commit -m "資料更新至 ${LAST}
+
+          由 GitHub Actions 自動執行。"
+          git push
+
+      # 這一段一定要留在這個 workflow 裡,不能指望 pages.yml 被觸發:GitHub 為了防止
+      # 無限迴圈,「用 GITHUB_TOKEN 推的 commit 不會觸發其他 workflow」。所以上面
+      # push 完之後 pages.yml 根本不會跑,網站會永遠停在最後一次「人」推的版本。
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - uses: actions/deploy-pages@v4

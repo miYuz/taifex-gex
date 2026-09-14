@@ -1,0 +1,9 @@
+# 核心(抓資料 + 算 GEX/Gamma Flip + 落地)
+pandas>=1.5
+requests>=2.28
+lxml>=4.9          # pandas.read_html 解析期交所的 HTML 表格
+pyarrow>=10.0      # 寫 parquet;沒有的話會自動略過只寫 CSV
+scipy>=1.7         # Black-76 IV 反推(brentq)+ Gamma/Vega(常態分布)
+
+# taifex_vix 依賴(到期日解析、選擇權行情抓取、TWSE 現貨快取共用)
+# CI 用 actions/checkout 另外簽出 miYuz/taifex-vix,見 .github/workflows/daily.yml

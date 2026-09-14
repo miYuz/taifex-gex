@@ -1,0 +1,18 @@
+# 快取與診斷檔(TAIEX 月檔、逐日明細),可重建,不進版控
+meta/
+detail/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# OS / 編輯器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
