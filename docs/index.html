@@ -1,4 +1,4 @@
-<title>台指 GEX / Gamma Flip 儀表板</title>
+<title>台指 GEX / Gamma Flip</title>
 
 <style>
   :root {
@@ -119,6 +119,7 @@
     background: var(--ink); color: var(--surface); border-color: var(--ink);
   }
   button.range:focus-visible { outline: 2px solid var(--spot); outline-offset: 2px; }
+  button.range:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* ---------- stat tiles ---------- */
   .tiles {
@@ -233,7 +234,7 @@
 
   <header>
     <div class="eyebrow">期交所公開資料 TXO</div>
-    <h1>台指 GEX / Gamma Flip 儀表板</h1>
+    <h1>台指 GEX / Gamma Flip</h1>
     <p class="lede">
       從 TXO 每日收盤選擇權行情反推 IV,以 Black-76 算每個履約價的 Gamma/Vega 曝險,
       只取<b>最近到期日</b>加總成 GEX,並找出 sticky-strike 假設下的零交叉點 Gamma Flip。
