@@ -521,7 +521,7 @@ function renderSnapshot() {
     return;
   }
   document.getElementById("strikeNote").textContent =
-    `${SNAPSHOT.date} · 到期 ${SNAPSHOT.expiry ?? "—"} · dte ${SNAPSHOT.dte ?? "—"} · 只顯示現貨/Flip中價 ±15% 範圍`;
+    `${SNAPSHOT.date} · 到期 ${SNAPSHOT.expiry ?? "—"} · dte ${SNAPSHOT.dte ?? "—"} · 只顯示現貨/Flip中價 ±10% 範圍`;
   drawStrikeBar(document.getElementById("plotStrike"), SNAPSHOT);
   drawCurve(document.getElementById("plotCurve"), SNAPSHOT);
 }

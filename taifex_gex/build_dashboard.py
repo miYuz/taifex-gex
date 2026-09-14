@@ -26,7 +26,7 @@ else:
 TPL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard")
 DEFAULT_OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gex_dashboard.html")
 
-STRIKE_WINDOW_PCT = 0.15   # 各履約價 GEX 圖只顯示「現貨/Flip 中價」±15%,深度價外剪掉
+STRIKE_WINDOW_PCT = 0.10   # 各履約價 GEX 圖只顯示「現貨/Flip 中價」±10%,深度價外剪掉
 
 
 def build_payload(df):
