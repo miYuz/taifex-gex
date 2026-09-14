@@ -201,6 +201,9 @@
   /* ---------- table ---------- */
   .tablewrap { overflow-x: auto; border: 1px solid var(--hairline); background: var(--surface); }
   table { border-collapse: collapse; width: 100%; min-width: 640px; }
+  /* Call Wall / Put Wall 只有 4 欄,擠在 .grid2 的半寬欄位裡——640px 的下限硬把它們
+     撐超出容器,逼出不必要的左右捲動。這兩張表不需要那個下限,讓它們貼著容器寬度就好。 */
+  .grid2 .tablewrap table { min-width: 0; }
   caption { text-align: left; padding: 14px 16px 10px; font-size: 14px; font-weight: 620; }
   th, td {
     padding: 7px 16px; text-align: right;
