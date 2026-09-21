@@ -15,9 +15,9 @@ from datetime import date, datetime
 if __package__ in (None, ""):
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from taifex_gex import config, pipeline
+    from taifex_gex import config, pipeline, taiex
 else:
-    from . import config, pipeline
+    from . import config, pipeline, taiex
 
 from taifex_vix import fetch as vix_fetch
 
@@ -73,7 +73,22 @@ def cmd_daily(args):
         print("往回 10 天都找不到交易日的選擇權行情")
         return 1
 
-    res = pipeline.run_day(d, mode="nearest")
+    # 大盤收盤(證交所)常常比期交所結算價晚公布,而且從 GitHub runner 看到的時間點
+    # 可能又比本機晚一兩分鐘。現貨拿不到的話,寫進去的那一天現貨是空的、距離/Flip 位置
+    # 都不完整,還會連同儀表板一起部署上線。所以先短暫等一下,等不到就整天不寫入,
+    # 網站維持上一個完整交易日,下一個排程時段再補。
+    spot = taiex.fetch_day(d)
+    if spot is None and d == date.today() and args.wait > 0:
+        deadline = time.monotonic() + min(args.wait, 20) * 60
+        while spot is None and time.monotonic() < deadline:
+            print(f"[wait] {datetime.now():%H:%M:%S} {d} TAIEX 收盤尚未公布,{POLL_SEC // 60} 分後重試")
+            time.sleep(POLL_SEC)
+            spot = taiex.fetch_day(d)
+    if spot is None:
+        print(f"{d} TAIEX 收盤還沒公布,不寫入這一天(保留上一個完整交易日,等下一個排程時段)")
+        return 0
+
+    res = pipeline.run_day(d, mode="nearest", spot=spot)
     if not res["ok"]:
         print(f"{d} 算不出來: {res['reason']}")
         return 1
