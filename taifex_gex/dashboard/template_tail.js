@@ -493,6 +493,18 @@ function drawCurve(host, S) {
     svg.appendChild(el("circle", { cx: X(S.flip), cy: Y(0), r: 4, fill: css("--flip"),
                                    stroke: css("--surface"), "stroke-width": 2 }));
   }
+  // Max Pain 點位:垂直線 + 曲線上該價位對應的 GEX 值(線性內插),
+  // 讓你看到「Max Pain 落在 GEX 曲線的哪一段」——在煞車區還是油門區。
+  if (S.max_pain !== null && S.max_pain !== undefined && S.max_pain >= loK && S.max_pain <= hiK) {
+    let j = 1;
+    while (j < n - 1 && S.curve_x[j] < S.max_pain) j++;
+    const x0 = S.curve_x[j - 1], x1 = S.curve_x[j];
+    const g = S.curve_gex[j - 1] + (S.curve_gex[j] - S.curve_gex[j - 1]) * ((S.max_pain - x0) / (x1 - x0 || 1));
+    svg.appendChild(el("line", { x1: X(S.max_pain), x2: X(S.max_pain), y1: M.t, y2: M.t + ih,
+                                 stroke: css("--key"), "stroke-width": 1.4, "stroke-dasharray": "2 3" }));
+    svg.appendChild(el("circle", { cx: X(S.max_pain), cy: Y(g), r: 4.5, fill: css("--key"),
+                                   stroke: css("--surface"), "stroke-width": 2 }));
+  }
 
   host.appendChild(svg);
 
