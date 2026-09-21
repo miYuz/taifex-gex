@@ -69,7 +69,12 @@ def _build_snapshot_payload(df, verbose=True):
     gamma 越集中在現貨附近,固定視窗會有大半張圖是空的。
     """
     latest = df["trade_date"].max().date()
-    res = pipeline.run_day(latest, mode="nearest")
+    # 現貨直接用主輸出裡這一天已存好的值,不要在建置時再去打一次證交所:
+    # 那個端點從 GitHub runner 看到當天收盤的時間點不穩定,建置那一刻拿不到的話,
+    # 快照會少了現貨線、Wall 表的「距現貨」也跟著變成空的。
+    spot_saved = df.loc[df["trade_date"] == df["trade_date"].max(), "spot"].iloc[0]
+    res = pipeline.run_day(latest, mode="nearest",
+                           spot=None if pd.isna(spot_saved) else float(spot_saved))
     if not res["ok"]:
         if verbose:
             print(f"[warn] 最新交易日快照算不出來: {res['reason']}")
