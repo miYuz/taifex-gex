@@ -19,14 +19,14 @@ import pandas as pd
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from taifex_gex import pipeline
+    from taifex_gex import gex_core, pipeline
 else:
-    from . import pipeline
+    from . import gex_core, pipeline
 
 TPL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard")
 DEFAULT_OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gex_dashboard.html")
 
-STRIKE_WINDOW_PCT = 0.10   # 各履約價 GEX 圖只顯示「現貨/Flip 中價」±10%,深度價外剪掉
+PAIN_WINDOW_PCT = 0.15     # Max Pain 損益曲線顯示現貨 ±15%(曲線是連續的 V 型,要看得到兩翼)
 
 
 def build_payload(df):
@@ -52,6 +52,7 @@ def build_payload(df):
         "spot": col("spot", 2), "flip": col("gamma_flip", 1),
         "flip_dist": col("flip_dist", 1), "gex": col("gex_total_e8", 2),
         "regime": scol("gex_regime"), "expiry": scol("expiry_used"), "dte": icol("dte"),
+        "max_pain": col("max_pain", 1), "max_pain_dist": col("max_pain_dist", 1),
     }
 
 
@@ -63,10 +64,9 @@ def _build_snapshot_payload(df, verbose=True):
     只算最近到期日:試過加一個「次近到期」切換,但次近到期的 OI 通常薄很多,
     算出來的 GEX 排行雜訊大、參考價值低,拿掉了。
 
-    各履約價圖只留「現貨/Flip 中價」±10% 範圍內的履約價:到期日越遠的月選常常有
-    300+ 檔履約價,絕大部分深度價外幾乎是 0,全部畫出來只會讓圖擠成一片看不出重點。
-    用中價(而不是單看現貨)當窗口中心,現貨、Flip 兩條線才都穩穩落在可視範圍內
-    ——如果哪天 flip_dist 拉得比較開,單用現貨當中心可能會把 flip 那條線切到窗外。
+    各履約價圖的顯示範圍用 gex_core.active_window 自動抓「GEX 真的有東西」的區間
+    (外框仍是之前調過的 ±10%),Flip、Max Pain 兩條線一定會落在範圍內。到期日越近
+    gamma 越集中在現貨附近,固定視窗會有大半張圖是空的。
     """
     latest = df["trade_date"].max().date()
     res = pipeline.run_day(latest, mode="nearest")
@@ -77,25 +77,28 @@ def _build_snapshot_payload(df, verbose=True):
 
     ps = res["per_strike"]
     curve = res["curve"]
-    spot, flip = res["spot"], res["gamma_flip"]
-    mid = None
-    if spot is not None and flip is not None:
-        mid = (spot + flip) / 2
-    elif spot is not None:
-        mid = spot
-    if mid is not None:
-        lo, hi = mid * (1 - STRIKE_WINDOW_PCT), mid * (1 + STRIKE_WINDOW_PCT)
+    spot, flip, max_pain = res["spot"], res["gamma_flip"], res["max_pain"]
+    if spot is not None:
+        lo, hi = gex_core.active_window(ps, spot, key_levels=(flip, max_pain))
         ps = ps[(ps["strike"] >= lo) & (ps["strike"] <= hi)]
+
+    pain = res["pain"]
+    if spot is not None and len(pain):
+        pain = pain[(pain["strike"] >= spot * (1 - PAIN_WINDOW_PCT)) &
+                    (pain["strike"] <= spot * (1 + PAIN_WINDOW_PCT))]
 
     return {
         "date": latest.strftime("%Y-%m-%d"),
         "spot": round(float(spot), 1) if spot is not None else None,
         "flip": round(float(flip), 1) if flip is not None else None,
+        "max_pain": round(float(max_pain), 1) if max_pain is not None else None,
         "expiry": res["expiries_used"], "dte": res["dte"],
         "strike": [float(v) for v in ps["strike"]],
         "strike_gex": [round(float(v), 3) for v in ps["gex_e8"]],
         "curve_x": [round(float(v), 1) for v in curve["S_hyp"]],
         "curve_gex": [round(float(v), 3) for v in curve["gex_e8"]],
+        "pain_strike": [float(v) for v in pain["strike"]],
+        "pain_payout": [round(float(v), 3) for v in pain["payout_e8"]],
     }
 
 

@@ -12,7 +12,7 @@ const fmtSigned = (v, n = 1) => (v === null || v === undefined || Number.isNaN(v
 const N = DATA.d.length;
 let view = { from: Math.max(0, N - 21), to: N };   // 預設近 1 個月,別讓第一眼就是看不出東西的長圖
 
-const KEYS = ["d", "spot", "flip", "flip_dist", "gex", "regime", "expiry", "dte"];
+const KEYS = ["d", "spot", "flip", "flip_dist", "gex", "regime", "expiry", "dte", "max_pain", "max_pain_dist"];
 const slice = () => {
   const o = {};
   for (const k of KEYS) o[k] = DATA[k].slice(view.from, view.to);
@@ -57,7 +57,8 @@ function labelFor(iso, dense) { return dense ? iso.slice(5) : iso.slice(0, 7); }
 /* ---------- 主圖:現貨 vs Gamma Flip ---------- */
 const SERIES = [
   { key: "spot", name: "TAIEX 現貨", color: "--spot", short: "現貨", dash: false },
-  { key: "flip", name: "Gamma Flip", color: "--flip", short: "Flip", dash: true },
+  { key: "flip", name: "Gamma Flip", color: "--flip", short: "Flip", dash: true, dashArr: "5 4" },
+  { key: "max_pain", name: "Max Pain", color: "--key", short: "Max Pain", dash: true, dashArr: "2 3" },
 ];
 
 function drawMain(host, S) {
@@ -112,7 +113,7 @@ function drawMain(host, S) {
     svg.appendChild(el("path", { d: dpath, fill: "none", stroke: css(s.color),
                                  "stroke-width": s.dash ? 1.6 : 2, "stroke-linejoin": "round",
                                  "stroke-linecap": "round",
-                                 "stroke-dasharray": s.dash ? "5 4" : null }));
+                                 "stroke-dasharray": s.dash ? (s.dashArr || "5 4") : null }));
     if (lastI >= 0) ends.push({ s, i: lastI, v: S[s.key][lastI], y: Y(S[s.key][lastI]) });
   }
 
@@ -238,6 +239,8 @@ function drawTiles(S) {
     { k: "現貨", c: "--spot", v: S.spot[i], fmtN: 0, sub: S.d[i] },
     { k: "距離(現貨-Flip)", c: null, v: S.flip_dist[i], fmtN: 0, signed: true,
       sub: S.flip_dist[i] === null ? "—" : (S.flip_dist[i] >= 0 ? "在煞車區之上" : "在油門區之下") },
+    { k: "Max Pain", c: "--key", v: S.max_pain[i], fmtN: 0,
+      sub: S.max_pain[i] === null || S.spot[i] === null ? "—" : `${fmtSigned(S.max_pain[i] - S.spot[i], 0)} 點(相對現貨)` },
     { k: "總 GEX(億)", c: regime === "positive" ? "--gex-pos" : "--gex-neg", v: S.gex[i],
       fmtN: 1, signed: true, sub: null, pill: regime },
   ];
@@ -262,6 +265,7 @@ function drawTable(S) {
       <td>${S.spot[i] === null ? '<span class="na">—</span>' : S.spot[i].toLocaleString()}</td>
       <td>${S.flip[i] === null ? '<span class="na">—</span>' : S.flip[i].toLocaleString()}</td>
       <td>${S.flip_dist[i] === null ? '<span class="na">—</span>' : fmtSigned(S.flip_dist[i], 0)}</td>
+      <td>${S.max_pain[i] === null ? '<span class="na">—</span>' : S.max_pain[i].toLocaleString()}</td>
       <td>${S.gex[i] === null ? '<span class="na">—</span>' : fmtSigned(S.gex[i], 1)}</td>
       <td><span class="badge" style="color:var(${regime === "positive" ? "--gex-pos" : "--gex-neg"})">${regime === "positive" ? "正" : "負"}</span></td>
       <td>${S.expiry[i] ?? '<span class="na">—</span>'}</td>
@@ -280,6 +284,7 @@ function tipHTML(S, i) {
     <div class="row"><span class="swatch" style="background:var(--spot)"></span>現貨 <b>${fmt(S.spot[i], 0)}</b></div>
     <div class="row"><span class="swatch" style="background:var(--flip)"></span>Flip <b>${fmt(S.flip[i], 0)}</b></div>
     <div class="row">距離 <b>${fmtSigned(S.flip_dist[i], 0)}</b></div>
+    <div class="row"><span class="swatch" style="background:var(--key)"></span>Max Pain <b>${fmt(S.max_pain[i], 0)}</b></div>
     <div class="row" style="margin-top:4px">
       <span class="swatch" style="background:var(${regime === "positive" ? "--gex-pos" : "--gex-neg"})"></span>
       總GEX <b>${fmtSigned(S.gex[i], 1)} 億</b></div>
@@ -393,6 +398,10 @@ function drawStrikeBar(host, S) {
   if (S.flip !== null) {
     svg.appendChild(el("line", { x1: X(S.flip), x2: X(S.flip), y1: M.t, y2: M.t + ih,
                                  stroke: css("--flip"), "stroke-width": 1.4, "stroke-dasharray": "5 4" }));
+  }
+  if (S.max_pain !== null && S.max_pain !== undefined) {
+    svg.appendChild(el("line", { x1: X(S.max_pain), x2: X(S.max_pain), y1: M.t, y2: M.t + ih,
+                                 stroke: css("--key"), "stroke-width": 1.4, "stroke-dasharray": "2 3" }));
   }
 
   for (const k of niceTicks(loK - kPad, hiK + kPad, Math.floor(iw / 80))) {
@@ -515,15 +524,123 @@ function drawCurve(host, S) {
   svg.addEventListener("pointerleave", () => { cross.setAttribute("opacity", 0); if (tip) tip.classList.remove("on"); });
 }
 
+/* ---------- 今日快照:Max Pain 到期損益曲線 ---------- */
+function drawPainCurve(host, S) {
+  host.querySelectorAll("svg").forEach((n) => n.remove());
+  const n = (S.pain_strike || []).length;
+  if (!n) { host.insertAdjacentHTML("afterbegin", '<p style="color:var(--muted);font-size:13px">最新一日算不出 Max Pain。</p>'); return; }
+  host.querySelectorAll("p").forEach((p) => p.remove());
+
+  const W = Math.max(320, host.clientWidth);
+  const PLOT_H = W < 560 ? 200 : 260;
+  const M = { t: 12, b: 26, ...marginsFor(W) };
+  const H = PLOT_H + M.t + M.b;
+  const iw = W - M.l - M.r, ih = PLOT_H;
+
+  const loK = Math.min(...S.pain_strike), hiK = Math.max(...S.pain_strike);
+  const X = (k) => M.l + ((k - loK) / (hiK - loK)) * iw;
+  const mx = Math.max(...S.pain_payout) * 1.08 || 1;
+  const Y = (v) => M.t + ih - (v / mx) * ih;
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H,
+                          role: "img", "aria-label": "Max Pain 到期損益曲線" });
+
+  for (const t of niceTicks(0, mx, 4)) {
+    svg.appendChild(el("line", { x1: M.l, x2: M.l + iw, y1: Y(t), y2: Y(t),
+                                 stroke: t === 0 ? css("--axis") : css("--grid"), "stroke-width": 1 }));
+    const tx = el("text", { x: M.l - 8, y: Y(t) + 4, "text-anchor": "end", fill: css("--muted"),
+                            "font-size": 10.5, "font-family": "ui-monospace, Consolas, monospace" });
+    tx.textContent = t.toFixed(0);
+    svg.appendChild(tx);
+  }
+  for (const k of niceTicks(loK, hiK, Math.floor(iw / 80))) {
+    const tx = el("text", { x: X(k), y: M.t + ih + 17, "text-anchor": "middle", fill: css("--muted"),
+                            "font-size": 10.5, "font-family": "ui-monospace, Consolas, monospace" });
+    tx.textContent = k.toLocaleString();
+    svg.appendChild(tx);
+  }
+
+  let dpath = "";
+  S.pain_strike.forEach((k, i) => { dpath += (i ? "L" : "M") + X(k).toFixed(1) + " " + Y(S.pain_payout[i]).toFixed(1) + " "; });
+  svg.appendChild(el("path", { d: dpath, fill: "none", stroke: css("--key"),
+                               "stroke-width": 2, "stroke-linejoin": "round" }));
+
+  if (S.spot !== null) {
+    svg.appendChild(el("line", { x1: X(S.spot), x2: X(S.spot), y1: M.t, y2: M.t + ih,
+                                 stroke: css("--spot"), "stroke-width": 1.4 }));
+  }
+  if (S.flip !== null) {
+    svg.appendChild(el("line", { x1: X(S.flip), x2: X(S.flip), y1: M.t, y2: M.t + ih,
+                                 stroke: css("--flip"), "stroke-width": 1.4, "stroke-dasharray": "5 4" }));
+  }
+  let minIdx = 0;
+  S.pain_payout.forEach((v, i) => { if (v < S.pain_payout[minIdx]) minIdx = i; });
+  const mpx = X(S.pain_strike[minIdx]), mpy = Y(S.pain_payout[minIdx]);
+  svg.appendChild(el("line", { x1: mpx, x2: mpx, y1: M.t, y2: M.t + ih,
+                               stroke: css("--key"), "stroke-width": 1.4, "stroke-dasharray": "2 3" }));
+  svg.appendChild(el("circle", { cx: mpx, cy: mpy, r: 4.5, fill: css("--key"),
+                                 stroke: css("--surface"), "stroke-width": 2 }));
+
+  host.appendChild(svg);
+
+  const tip = host.querySelector(".tip");
+  const cross = el("line", { y1: M.t, y2: M.t + ih, stroke: css("--axis"), "stroke-width": 1, opacity: 0 });
+  svg.insertBefore(cross, svg.firstChild.nextSibling);
+  const idxFrom = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    const x = (clientX - r.left) * (W / r.width);
+    const k = loK + ((x - M.l) / iw) * (hiK - loK);
+    let best = 0, bd = Infinity;
+    S.pain_strike.forEach((sk, i) => { const d = Math.abs(sk - k); if (d < bd) { bd = d; best = i; } });
+    return best;
+  };
+  const show = (i) => {
+    const px = X(S.pain_strike[i]);
+    cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", 1);
+    if (!tip) return;
+    tip.innerHTML = `<div class="date">假設結算價 ${S.pain_strike[i].toLocaleString()}</div>
+      <div class="row">買方損益總額 <b>${S.pain_payout[i].toFixed(1)} 億</b></div>`;
+    tip.classList.add("on");
+    const scale = host.clientWidth / W;
+    const tw = tip.offsetWidth;
+    const left = Math.max(tw / 2 + 2, Math.min(host.clientWidth - tw / 2 - 2, px * scale));
+    tip.style.left = left + "px";
+    tip.style.top = "6px";
+  };
+  svg.addEventListener("pointermove", (e) => show(idxFrom(e.clientX)));
+  svg.addEventListener("pointerdown", (e) => show(idxFrom(e.clientX)));
+  svg.addEventListener("pointerleave", () => { cross.setAttribute("opacity", 0); if (tip) tip.classList.remove("on"); });
+}
+
+/* 右邊那張卡的分頁:GEX 曲線 / Max Pain 損益。隱藏中的容器寬度是 0,
+   所以只畫「目前顯示中」的那一張,切換分頁時才畫另一張。 */
+let rightTab = "curve";
+function renderRight() {
+  if (!SNAPSHOT) return;
+  const isCurve = rightTab === "curve";
+  document.getElementById("plotCurve").hidden = !isCurve;
+  document.getElementById("plotPain").hidden = isCurve;
+  document.getElementById("segCurve").setAttribute("aria-pressed", String(isCurve));
+  document.getElementById("segPain").setAttribute("aria-pressed", String(!isCurve));
+  document.getElementById("rightTitle").textContent = isCurve ? "GEX vs 假設價位曲線" : "Max Pain 到期損益曲線";
+  document.getElementById("rightNote").textContent = isCurve
+    ? "sticky-strike:重算不同假設現貨價,IV 固定不動"
+    : "買方(call+put)到期內含價值總額,依假設結算價;最低點就是 Max Pain";
+  if (isCurve) drawCurve(document.getElementById("plotCurve"), SNAPSHOT);
+  else drawPainCurve(document.getElementById("plotPain"), SNAPSHOT);
+}
+document.getElementById("segCurve").addEventListener("click", () => { rightTab = "curve"; renderRight(); });
+document.getElementById("segPain").addEventListener("click", () => { rightTab = "pain"; renderRight(); });
+
 function renderSnapshot() {
   if (!SNAPSHOT) {
     document.getElementById("strikeNote").textContent = "最新一日快照算不出來";
     return;
   }
   document.getElementById("strikeNote").textContent =
-    `${SNAPSHOT.date} · 到期 ${SNAPSHOT.expiry ?? "—"} · dte ${SNAPSHOT.dte ?? "—"} · 只顯示現貨/Flip中價 ±10% 範圍`;
+    `${SNAPSHOT.date} · 到期 ${SNAPSHOT.expiry ?? "—"} · dte ${SNAPSHOT.dte ?? "—"} · 自動抓 GEX 有效範圍`;
   drawStrikeBar(document.getElementById("plotStrike"), SNAPSHOT);
-  drawCurve(document.getElementById("plotCurve"), SNAPSHOT);
+  renderRight();
 }
 
 /* ---------- Call Wall / Put Wall 表(今日各履約價 GEX 排行)---------- */

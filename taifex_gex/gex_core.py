@@ -170,6 +170,71 @@ def prep_contracts(df_exp, dte, T_days_override=None):
     return contracts, meta
 
 
+# ---------------------------------------------------------------- Max Pain
+def compute_max_pain(df_exp):
+    """單一到期日的 Max Pain。回傳 (max_pain_strike, payout DataFrame(strike, payout_e8)) 或 (None, 空表)。
+
+    對每個實際掛牌的履約價當假設結算價 s,算全部買方(call+put)到期內含價值總額
+    Σ max(s-K,0)×OI_call + Σ max(K-s,0)×OI_put,乘點值 50 換成 NT$,再除 1e8 = 億。
+    總額最小的 s 就是 Max Pain(賣方最有利、買方最痛)。
+
+    直接吃原始 OI,不吃 prep_contracts 的結果:那份會把 IV 反推失敗或結算價太小的
+    契約丟掉,但這些契約的未平倉量在到期時一樣要算損益,不該被排除。
+    """
+    d = df_exp[["strike", "right", "oi"]].copy()
+    d["oi"] = pd.to_numeric(d["oi"], errors="coerce").fillna(0.0)
+    d = d[d["oi"] > 0]
+    if d.empty:
+        return None, pd.DataFrame(columns=["strike", "payout_e8"])
+
+    strikes = np.array(sorted(set(df_exp["strike"].astype(float))))
+    c_oi = d[d["right"] == "C"].groupby("strike")["oi"].sum().reindex(strikes, fill_value=0.0).to_numpy()
+    p_oi = d[d["right"] == "P"].groupby("strike")["oi"].sum().reindex(strikes, fill_value=0.0).to_numpy()
+
+    settle = strikes[:, None]                       # 每列一個假設結算價
+    total = (np.maximum(settle - strikes[None, :], 0.0) * c_oi[None, :]).sum(axis=1) \
+        + (np.maximum(strikes[None, :] - settle, 0.0) * p_oi[None, :]).sum(axis=1)
+    pain = pd.DataFrame({"strike": strikes,
+                         "payout_e8": total * config.CONTRACT_MULTIPLIER / 1e8})
+    return float(pain.loc[pain["payout_e8"].idxmin(), "strike"]), pain
+
+
+def active_window(per_strike, spot, key_levels=(), min_pct=0.05, max_pct=0.10,
+                  threshold_frac=0.03, pad_strikes=3):
+    """自動抓「GEX 真的有東西」的履約價範圍,取代固定 ±X%。
+
+    到期日越近,gamma 越集中在現貨附近(gamma ∝ 1/√T),固定視窗會有大半張圖是空的。
+    先找 |GEX| 超過最大值 threshold_frac 的履約價當有效範圍,往外墊 pad_strikes 檔,
+    確保 key_levels(Flip、Max Pain)都在範圍內,再用 [spot×(1-max_pct), spot×(1+max_pct)]
+    當外框(max_pct 沿用之前調過的 ±10% 上限),min_pct 當下限寬度。
+    """
+    lo_cap, hi_cap = spot * (1 - max_pct), spot * (1 + max_pct)
+    strikes = per_strike["strike"].to_numpy(dtype=float)
+    vals = per_strike["gex_e8"].abs().to_numpy(dtype=float)
+    mx = vals.max() if len(vals) else 0.0
+
+    if mx <= 0:
+        lo, hi = lo_cap, hi_cap
+    else:
+        order = np.argsort(strikes)
+        s_sorted, v_sorted = strikes[order], vals[order]
+        active = np.where(v_sorted >= mx * threshold_frac)[0]
+        lo_i = max(0, int(active.min()) - pad_strikes)
+        hi_i = min(len(s_sorted) - 1, int(active.max()) + pad_strikes)
+        lo, hi = float(s_sorted[lo_i]), float(s_sorted[hi_i])
+
+    for k in key_levels:
+        if k is not None:
+            lo, hi = min(lo, k), max(hi, k)
+    lo, hi = max(lo, lo_cap), min(hi, hi_cap)
+
+    min_span = spot * min_pct
+    if hi - lo < min_span:
+        mid = (hi + lo) / 2
+        lo, hi = mid - min_span / 2, mid + min_span / 2
+    return lo, hi
+
+
 # ---------------------------------------------------------------- aggregation
 def aggregate_by_strike(contracts):
     """逐履約價加總 GEX/VEX(億 NT$)。"""

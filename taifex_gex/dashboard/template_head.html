@@ -12,7 +12,8 @@
     --axis:         #c3c2b7;
     --hairline:     rgba(11,11,11,0.10);
     --spot:         #2A78D6;   /* 現貨 */
-    --flip:         #A67A1E;   /* Gamma Flip */
+    --flip:         #7A5AC2;   /* Gamma Flip(跟 us-gex 同色) */
+    --key:          #A67A1E;   /* Max Pain */
     --gex-pos:      #009E9B;   /* 正 GEX(煞車/牆) */
     --gex-neg:      #9C641A;   /* 負 GEX(油門/加速) */
     --chip:         rgba(11,11,11,0.05);
@@ -29,7 +30,8 @@
       --axis:     #383835;
       --hairline: rgba(255,255,255,0.10);
       --spot:     #4A93E8;
-      --flip:     #AD8722;
+      --flip:     #9B84D6;
+      --key:      #AD8722;
       --gex-pos:  #2BA6A4;
       --gex-neg:  #B87D22;
       --chip:     rgba(255,255,255,0.06);
@@ -46,7 +48,8 @@
     --axis:     #383835;
     --hairline: rgba(255,255,255,0.10);
     --spot:     #4A93E8;
-    --flip:     #AD8722;
+    --flip:     #9B84D6;
+    --key:      #AD8722;
     --gex-pos:  #2BA6A4;
     --gex-neg:  #B87D22;
     --chip:     rgba(255,255,255,0.06);
@@ -120,6 +123,21 @@
   }
   button.range:focus-visible { outline: 2px solid var(--spot); outline-offset: 2px; }
   button.range:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* 卡片內的分頁切換(GEX 曲線 / Max Pain 損益)。刻意不用 .range 這個 class:
+     .range 有全域的時間區間點擊處理,共用會讓切分頁時順便把歷史圖區間重設。 */
+  .seg { display: inline-flex; margin-left: auto; }
+  button.seg-btn {
+    font: inherit; font-size: 12px;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    padding: 4px 11px; min-height: 28px;
+    color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--hairline); cursor: pointer;
+  }
+  button.seg-btn + button.seg-btn { border-left: 0; }
+  button.seg-btn:hover { background: var(--chip); color: var(--ink); }
+  button.seg-btn[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+  button.seg-btn:focus-visible { outline: 2px solid var(--spot); outline-offset: 2px; }
 
   /* ---------- stat tiles ---------- */
   .tiles {
@@ -237,7 +255,8 @@
     <h1>台指 GEX / Gamma Flip</h1>
     <p class="lede">
       從 TXO 每日收盤選擇權行情反推 IV,以 Black-76 算每個履約價的 Gamma/Vega 曝險,
-      只取<b>最近到期日</b>加總成 GEX,並找出 sticky-strike 假設下的零交叉點 Gamma Flip。
+      只取<b>最近到期日</b>加總成 GEX,找出 sticky-strike 假設下的零交叉點 Gamma Flip,
+      以及讓買方到期損益總和最小的 Max Pain。
       對照「羊叔開講」2026-08-11 文章公開數字:GEX 排行誤差 &lt;1%、只算最近到期日時
       Gamma Flip 誤差僅 0.01%。
     </p>
@@ -250,16 +269,26 @@
       <div class="card-head">
         <h2>今日 GEX 各履約價</h2>
         <span class="note" id="strikeNote">載入中…</span>
+        <div class="legend">
+          <span class="item"><span class="line" style="background:var(--spot)"></span>現貨</span>
+          <span class="item"><span class="line dashed" style="color:var(--flip)"></span>Gamma Flip</span>
+          <span class="item"><span class="line dashed" style="color:var(--key)"></span>Max Pain</span>
+        </div>
       </div>
       <div class="plot" id="plotStrike"><div class="tip" id="tipStrike"></div></div>
     </section>
 
     <section class="card">
       <div class="card-head">
-        <h2>GEX vs 假設價位曲線</h2>
-        <span class="note">sticky-strike:重算不同假設現貨價,IV 固定不動</span>
+        <h2 id="rightTitle">GEX vs 假設價位曲線</h2>
+        <div class="seg" role="group" aria-label="切換圖表">
+          <button class="seg-btn" id="segCurve" aria-pressed="true">GEX 曲線</button>
+          <button class="seg-btn" id="segPain" aria-pressed="false">Max Pain 損益</button>
+        </div>
+        <span class="note" id="rightNote">sticky-strike:重算不同假設現貨價,IV 固定不動</span>
       </div>
       <div class="plot" id="plotCurve"><div class="tip" id="tipCurve"></div></div>
+      <div class="plot" id="plotPain" hidden><div class="tip" id="tipPain"></div></div>
     </section>
   </div>
 
@@ -299,11 +328,12 @@
 
   <section class="card">
     <div class="card-head">
-      <h2>現貨 vs Gamma Flip</h2>
+      <h2>現貨 vs Gamma Flip vs Max Pain</h2>
       <span class="note" id="rangeNote"></span>
       <div class="legend">
         <span class="item"><span class="line" style="background:var(--spot)"></span>TAIEX 現貨</span>
         <span class="item"><span class="line dashed" style="color:var(--flip)"></span>Gamma Flip(最近到期日)</span>
+        <span class="item"><span class="line dashed" style="color:var(--key)"></span>Max Pain(最近到期日)</span>
       </div>
     </div>
     <div class="plot" id="plotMain"><div class="tip" id="tip"></div></div>
@@ -330,6 +360,7 @@
           <th scope="col">現貨</th>
           <th scope="col">Gamma Flip</th>
           <th scope="col">距離</th>
+          <th scope="col">Max Pain</th>
           <th scope="col">總 GEX(億)</th>
           <th scope="col">Regime</th>
           <th scope="col">到期</th>
@@ -346,6 +377,9 @@
       量級會比文章數字小,但 Gamma Flip 位置反而更準(對照文章當天誤差僅 0.01%)。</div>
     <div><b>Gamma Flip 用 sticky-strike 簡化</b>:重算不同假設現貨價時,每個履約價的 IV 固定不動,
       只有 forward 隨假設價位等比例平移。r=0(近月 e^-rT 影響 &lt;0.05%)。</div>
+    <div><b>Max Pain</b>:對每個實際掛牌的履約價當假設結算價,算全部買方(call+put)到期內含價值總額
+      (Σ 內含價值 × OI × 點值 50),總額最小的履約價就是 Max Pain。直接吃原始 OI,不受 IV 反推成功與否影響。
+      跟 GEX、Gamma Flip 一樣只算最近到期日,用的是收盤後的 OI,不是盤中即時。</div>
     <div><b>VEX(Vega 曝險)目前未納入</b>:嘗試過的版本量級與參考文章對不上(約 1/12),
       精確公式未還原,暫不在儀表板呈現,避免誤導。</div>
     <div>GEX 正負符號採業界標準假設:造市商 long call gamma、short put gamma。這是簡化假設,

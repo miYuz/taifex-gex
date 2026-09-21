@@ -35,7 +35,8 @@ def run_day(d, mode="nearest", spot=None):
            "reason": None, "spot": spot, "per_strike": pd.DataFrame(),
            "curve": pd.DataFrame(), "contracts": pd.DataFrame(),
            "gamma_flip": None, "gex_total_e8": None, "vex_total_e8": None,
-           "expiries_used": None, "dte": None, "F": None}
+           "expiries_used": None, "dte": None, "F": None,
+           "max_pain": None, "pain": pd.DataFrame()}
 
     df = _load_option_day(d)
     if df is None:
@@ -56,6 +57,7 @@ def run_day(d, mode="nearest", spot=None):
         out["expiries_used"] = str(code)
         out["dte"] = int(dte)
         out["F"] = meta.get("F")
+        out["max_pain"], out["pain"] = gex_core.compute_max_pain(df_exp)
     else:  # 'all'
         cand = df[df["dte"] >= 1]
         if cand.empty:
@@ -104,6 +106,7 @@ def summarize_row(res):
         "gex_total_e8": res["gex_total_e8"], "vex_total_e8": res["vex_total_e8"],
         "vex_uniform_total_e8": res.get("vex_uniform_total_e8"),
         "flip_dist": None, "gex_regime": None,
+        "max_pain": res.get("max_pain"), "max_pain_dist": None,
         "top_wall_strike": None, "top_wall_gex_e8": None,
         "top_accel_strike": None, "top_accel_gex_e8": None,
         "n_contracts": None, "n_iv_ok": None, "iv_ok_ratio": None,
@@ -113,6 +116,8 @@ def summarize_row(res):
 
     if res["spot"] is not None and res["gamma_flip"] is not None:
         row["flip_dist"] = float(res["spot"] - res["gamma_flip"])
+    if res["spot"] is not None and res.get("max_pain") is not None:
+        row["max_pain_dist"] = float(res["spot"] - res["max_pain"])
     row["gex_regime"] = "positive" if res["gex_total_e8"] >= 0 else "negative"
 
     ps = res["per_strike"]

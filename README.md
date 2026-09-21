@@ -9,8 +9,8 @@ gamma，用 Black-76 對每個履約價反推 IV 再算 Gamma。對照「羊叔�
 公開文章的數字：全到期日加總的 GEX 排行誤差 <1%；只算最近到期日時 Gamma Flip
 誤差僅 0.01%。
 
-📈 **[互動儀表板](https://miyuz.github.io/taifex-gex/)** — 現貨/Flip 時序、每日總
-GEX、今日各履約價 GEX、GEX vs 假設價位曲線、Call Wall/Put Wall 排行
+📈 **[互動儀表板](https://miyuz.github.io/taifex-gex/)** — 現貨/Flip/Max Pain 時序、
+每日總 GEX、今日各履約價 GEX、GEX 曲線與 Max Pain 損益曲線、Call Wall/Put Wall 排行
 
 ---
 
@@ -73,6 +73,16 @@ set TAIFEX_GEX_OUT=C:\your\output\path
    每個履約價的 IV 固定不動,只有 forward 隨假設價位等比例平移。曲線由負轉正的
    零交叉點就是 Gamma Flip。
 
+6. **Max Pain**(跟美股版 [us-gex](https://github.com/miYuz/us-gex) 同一套定義):
+   對每個實際掛牌的履約價當假設結算價 s,算全部買方(call+put)到期內含價值總額
+   `Σ max(s-K,0)×OI_call + Σ max(K-s,0)×OI_put`,乘點值 50 換成 NT$;總額最小的 s 就是
+   Max Pain。直接吃原始 OI,不受 IV 反推成功與否影響(反推失敗的契約未平倉量到期時
+   一樣要算損益)。一樣只算最近到期日,用收盤後 OI,不是盤中即時。
+
+7. **各履約價圖的顯示範圍自動抓有效區間**(`gex_core.active_window`):到期日越近,
+   gamma 越集中在現貨附近,固定 ±10% 視窗會有大半張圖是空的。改成抓 `|GEX|` 超過
+   最大值 3% 的履約價往外墊 3 檔,外框仍是 ±10%,Flip 與 Max Pain 一定在範圍內。
+
 ### 對答案:跟參考文章的誤差
 
 用 2026-08-11 全到期日加總對照「羊叔開講」文章公開數字:
@@ -113,6 +123,7 @@ set TAIFEX_GEX_OUT=C:\your\output\path
 | `flip_dist` | 現貨 − Gamma Flip |
 | `gex_total_e8` | 當日總 GEX(億 NT$/1%) |
 | `gex_regime` | `positive`(煞車)/ `negative`(油門) |
+| `max_pain` / `max_pain_dist` | 最近到期日的 Max Pain 履約價 / 現貨 − Max Pain(2020 起已回補) |
 | `expiry_used` / `dte` | 採用的到期日代碼與剩餘天數 |
 | `top_wall_strike` / `top_wall_gex_e8` | 正 GEX 最大的履約價(壓力/磁吸) |
 | `top_accel_strike` / `top_accel_gex_e8` | 負 GEX 最大的履約價(加速點) |
